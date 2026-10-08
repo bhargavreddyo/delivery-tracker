@@ -17,7 +17,7 @@ COPY requirements.txt .
 
 #Installs all python dependencies listed in requirements.txt
 #no cache dir prevents pip from storing its package cache, keeping the image smaller
-RUN python -m pip instal --no-cache-dir -r requirements.txt
+RUN python -m pip install --no-cache-dir -r requirements.txt
 
 #Copies the local /app directory inti /app/app inside the container
 COPY app ./app
