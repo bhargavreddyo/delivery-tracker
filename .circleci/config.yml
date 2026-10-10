@@ -21,7 +21,7 @@ jobs:
           name: Check Python syntax
           command: python -m compileall -q app
 
-  build-image:
+  build-and-push-image:
     docker:
       - image: cimg/base:stable
 
@@ -31,13 +31,31 @@ jobs:
       - setup_remote_docker
 
       - run:
+          name: Log in to Docker Hub
+          command: |
+            printf '%s' "$DOCKERHUB_TOKEN" | docker login \
+              --username "$DOCKERHUB_USERNAME" \
+              --password-stdin
+
+      - run:
           name: Build Docker image
-          command: docker build -t delivery-tracker-app:ci .
+          command: |
+            docker build \
+              -t "$DOCKERHUB_USERNAME/jonsnow:latest" .
+
+      - run:
+          name: Push Docker image to Docker Hub
+          command: |
+            docker push "$DOCKERHUB_USERNAME/jonsnow:latest"
 
 workflows:
   delivery-tracker:
     jobs:
       - validate
-      - build-image:
+
+      - build-and-push-image:
           requires:
             - validate
+          filters:
+            branches:
+              only: main
