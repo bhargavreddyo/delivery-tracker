@@ -225,7 +225,7 @@ def queue(name: str):
 
 
 
-#newly added
+#newly added to get order summary
 @app.get("/orders/summary")
 def order_summary():
     rows = db.query(
@@ -240,3 +240,23 @@ def order_summary():
             row["status"]: row["count"] for row in rows
         }
     }
+
+
+#To delete
+@app.delete("/orders/{oid}")
+def delete_order(oid: int):
+    # Delete the order from PostgreSQL
+    row = db.one(
+        "DELETE FROM orders WHERE id = %s RETURNING id",
+        (oid,)
+    )
+
+    # Return an error if the order does not exist
+    if not row:
+        raise HTTPException(404, "no order with id %d" % oid)
+
+    # Remove the deleted order from Redis cache
+    cache.drop(order_key(oid))
+
+    # Return a confirmation message
+    return {"message": "Order deleted successfully", "id": oid}
