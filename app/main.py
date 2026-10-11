@@ -222,3 +222,21 @@ def queue(name: str):
         raise HTTPException(404, "nothing outstanding for %r" % name)
     return {"restaurant": name, "outstanding": len(rows),
             "orders": [{**r, **describe(r["status"])} for r in rows]}
+
+
+
+#newly added
+@app.get("/orders/summary")
+def order_summary():
+    rows = db.query(
+        "SELECT status, COUNT(*) AS count "
+        "FROM orders "
+        "GROUP BY status "
+        "ORDER BY status"
+    )
+    return {
+        "total_orders": sum(row["count"] for row in rows),
+        "orders_by_status": {
+            row["status"]: row["count"] for row in rows
+        }
+    }
