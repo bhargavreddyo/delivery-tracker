@@ -1,0 +1,82 @@
+
+# Services required for the delivery tracker
+services:
+
+  # PostgreSQL database
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: delivery
+      POSTGRES_USER: delivery
+      # Default password for local development
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-delivery_dev_password}
+    volumes:
+      # Keep database data between container restarts
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      # Check whether PostgreSQL is ready
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  # Redis cache
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      # Check whether Redis is responding
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  # Run database migrations automatically
+  migrate:
+    image: postgres:16-alpine
+    depends_on:
+      postgres:
+        # Wait until PostgreSQL is healthy
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://delivery:${POSTGRES_PASSWORD:-delivery_dev_password}@postgres:5432/delivery
+    volumes:
+      # Read the SQL migration files
+      - ./migrations:/migrations:ro
+    # Run both SQL files in order; stop if either fails
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        psql "$$DATABASE_URL" -v ON_ERROR_STOP=1 -f /migrations/001_schema.sql &&
+        psql "$$DATABASE_URL" -v ON_ERROR_STOP=1 -f /migrations/002_seed.sql
+
+  # FastAPI application
+  app:
+    build: .
+    ports:
+      # Access the application at localhost:8080
+      - "8080:8080"
+    environment:
+      # Connect to PostgreSQL and Redis
+      DATABASE_URL: postgresql://delivery:${POSTGRES_PASSWORD:-delivery_dev_password}@postgres:5432/delivery
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        # Start only after migrations finish successfully
+        condition: service_completed_successfully
+    healthcheck:
+      # Check the application's health endpoint
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+# Persistent storage for PostgreSQL
+volumes:
+  postgres_data:
