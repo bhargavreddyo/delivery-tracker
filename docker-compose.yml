@@ -1,14 +1,15 @@
-
 # Services required for the delivery tracker
 services:
 
   # PostgreSQL database
   postgres:
     image: postgres:16-alpine
+    ports:
+      - "5433:5432"
     environment:
       POSTGRES_DB: delivery
-      POSTGRES_USER: delivery
       # Default password for local development
+      POSTGRES_USER: delivery
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-delivery_dev_password}
     volumes:
       # Keep database data between container restarts
@@ -24,6 +25,8 @@ services:
   # Redis cache
   redis:
     image: redis:7-alpine
+    ports:
+      - "6380:6379"
     healthcheck:
       # Check whether Redis is responding
       test: ["CMD", "redis-cli", "ping"]
