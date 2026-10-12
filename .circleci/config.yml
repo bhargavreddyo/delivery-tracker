@@ -1,0 +1,215 @@
+
+version: 2.1
+
+
+
+jobs:
+  secret-scan:
+    docker:
+      - image: cimg/base:current
+    steps:
+      - checkout
+      - run:
+          name: Scan repository for leaked secrets
+          command: |
+            VERSION="8.30.1"
+            curl -fL "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz" -o /tmp/gitleaks.tar.gz
+            tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+            sudo install /tmp/gitleaks /usr/local/bin/gitleaks
+            gitleaks git --redact --verbose
+
+
+  lint:
+    docker:
+      - image: cimg/python:3.12
+    steps:
+      - checkout
+      - run:
+          name: Install dependencies
+          command: |
+            pip install -r requirements.txt
+            pip install ruff
+      - run:
+          name: Check Python code
+          command: ruff check app tests
+
+  
+  unit-tests:
+    docker:
+      - image: cimg/python:3.12
+    steps:
+      - checkout
+      - run:
+          name: Install dependencies
+          command: |
+            pip install -r requirements.txt
+            pip install pytest httpx
+      - run:
+          name: Run unit tests
+          command: python -m pytest tests/test_states.py -v
+
+  
+  integration-tests:
+    docker:
+      - image: cimg/python:3.12
+        environment:
+          DATABASE_URL: postgresql://delivery:delivery_dev_password@localhost:5432/delivery
+          REDIS_URL: redis://localhost:6379/0
+      - image: cimg/postgres:16.6
+        environment:
+          POSTGRES_USER: delivery
+          POSTGRES_PASSWORD: delivery_dev_password
+          POSTGRES_DB: delivery
+      - image: cimg/redis:7.2
+    steps:
+      - checkout
+      - run:
+          name: Install dependencies
+          command: |
+            pip install -r requirements.txt
+            pip install pytest httpx
+      - run:
+          name: Wait for PostgreSQL and Redis
+          command: |
+            for i in $(seq 1 30); do
+              if python -c "import psycopg; psycopg.connect('postgresql://delivery:delivery_dev_password@localhost:5432/delivery').close()"; then
+                break
+              fi
+              if [ "$i" -eq 30 ]; then
+                echo "PostgreSQL did not become available"
+                exit 1
+              fi
+              sleep 2
+            done
+            for i in $(seq 1 30); do
+              if python -c "import redis; redis.Redis.from_url('redis://localhost:6379/0').ping()"; then
+                break
+              fi
+              if [ "$i" -eq 30 ]; then
+                echo "Redis did not become available"
+                exit 1
+              fi
+              sleep 2
+            done
+      - run:
+          name: Apply database migrations
+          command: |
+            sudo apt-get update
+            sudo apt-get install -y postgresql-client
+            PGPASSWORD=delivery_dev_password psql -h localhost -U delivery -d delivery -v ON_ERROR_STOP=1 -f migrations/001_schema.sql
+            PGPASSWORD=delivery_dev_password psql -h localhost -U delivery -d delivery -v ON_ERROR_STOP=1 -f migrations/002_seed.sql
+      - run:
+          name: Run integration tests
+          command: python -m pytest tests/test_integration.py -v
+
+  
+  build-and-push-qa:
+    docker:
+      - image: cimg/base:current
+    steps:
+      - checkout
+      - setup_remote_docker
+      - run:
+          name: Log in to Docker Hub
+          command: |
+            echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USER" --password-stdin
+      - run:
+          name: Build and push QA image
+          command: |
+            SHORT_SHA=$(echo "$CIRCLE_SHA1" | cut -c1-7)
+            docker build -t bhargavreddyo/tylerdurden:qa .
+            docker tag bhargavreddyo/tylerdurden:qa "bhargavreddyo/tylerdurden:main-$SHORT_SHA"
+            docker push bhargavreddyo/tylerdurden:qa
+            docker push "bhargavreddyo/tylerdurden:main-$SHORT_SHA"
+
+  
+  build-and-push-stage:
+    docker:
+      - image: cimg/base:current
+    steps:
+      - checkout
+      - setup_remote_docker
+      - run:
+          name: Log in to Docker Hub
+          command: |
+            echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USER" --password-stdin
+      - run:
+          name: Build and push staging image
+          command: |
+            SHORT_SHA=$(echo "$CIRCLE_SHA1" | cut -c1-7)
+            docker build -t bhargavreddyo/tylerdurden:stage .
+            docker tag bhargavreddyo/tylerdurden:stage "bhargavreddyo/tylerdurden:staging-$SHORT_SHA"
+            docker push bhargavreddyo/tylerdurden:stage
+            docker push "bhargavreddyo/tylerdurden:staging-$SHORT_SHA"
+
+  build-and-push-prod:
+    docker:
+      - image: cimg/base:current
+    steps:
+      - checkout
+      - setup_remote_docker
+      - run:
+          name: Log in to Docker Hub
+          command: |
+            echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USER" --password-stdin
+      - run:
+          name: Build and push production image
+          command: |
+            SHORT_SHA=$(echo "$CIRCLE_SHA1" | cut -c1-7)
+            docker build -t bhargavreddyo/tylerdurden:prod .
+            docker tag bhargavreddyo/tylerdurden:prod "bhargavreddyo/tylerdurden:prod-$SHORT_SHA"
+            docker push bhargavreddyo/tylerdurden:prod
+            docker push "bhargavreddyo/tylerdurden:prod-$SHORT_SHA"
+
+
+
+
+
+  
+
+
+workflows:
+  main-qa:
+    jobs:
+      - secret-scan:
+          filters:
+            branches:
+              only: main
+      - lint:
+          requires:
+            - secret-scan
+          filters:
+            branches:
+              only: main
+      - unit-tests:
+          requires:
+            - lint
+          filters:
+            branches:
+              only: main
+      - integration-tests:
+          requires:
+            - unit-tests
+          filters:
+            branches:
+              only: main
+      - build-and-push-qa:
+          requires:
+            - integration-tests
+          filters:
+            branches:
+              only: main
+
+  staging-build:
+    jobs:
+      - build-and-push-stage:
+          filters:
+            branches:
+              only: staging
+
+  production-build:
+    jobs:
+      - build-and-push-prod:
+          filters:
+            branches:
+              only: prod
