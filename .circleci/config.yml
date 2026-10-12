@@ -1,6 +1,7 @@
 
 version: 2.1
 
+
 jobs:
   secret-scan:
     docker:
@@ -10,7 +11,9 @@ jobs:
       - run:
           name: Scan repository for leaked secrets
           command: |
-            curl -sSfL https://raw.githubusercontent.com/gitleaks/gitleaks/master/install.sh | sh -s -- -b /usr/local/bin
+            curl -sSfL https://github.com/gitleaks/gitleaks/releases/latest/download/gitleaks_linux_x64.tar.gz -o /tmp/gitleaks.tar.gz
+            tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+            sudo mv /tmp/gitleaks /usr/local/bin/gitleaks
             gitleaks git --redact --verbose
 
   lint:
