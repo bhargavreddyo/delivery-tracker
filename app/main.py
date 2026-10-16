@@ -260,3 +260,9 @@ def delete_order(oid: int):
 
     # Return a confirmation message
     return {"message": "Order deleted successfully", "id": oid}
+
+
+#This is a demo test
+print("Demo test")
+
+
