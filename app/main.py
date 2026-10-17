@@ -264,5 +264,6 @@ def delete_order(oid: int):
 
 #This is a demo test
 print("Demo test")
+print("hello")
 
 
